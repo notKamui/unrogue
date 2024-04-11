@@ -250,6 +250,25 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
     }
 }
 
+fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Object]) {
+    let x = objects[PLAYER].x + dx;
+    let y = objects[PLAYER].y + dy;
+    let target_id = objects
+        .iter()
+        .position(|object| object.position() == (x, y));
+    match target_id {
+        Some(target_id) => {
+            println!(
+                "The {} laughs at your puny efforts to attack.",
+                objects[target_id].name
+            );
+        }
+        None => {
+            Object::move_by(PLAYER, dx, dy, &game.map, objects);
+        }
+    }
+}
+
 fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recompute: bool) {
     if fov_recompute {
         let player = &objects[PLAYER];
@@ -299,7 +318,7 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
     );
 }
 
-fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAction {
+fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> PlayerAction {
     use PlayerAction::*;
 
     let key = tcod.root.wait_for_keypress(true);
@@ -334,7 +353,7 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAc
             _,
             true,
         ) => {
-            Object::move_by(PLAYER, 0, -1, &game.map, objects);
+            player_move_or_attack(0, -1, game, objects);
             TookTurn
         }
         (
@@ -345,7 +364,7 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAc
             _,
             true,
         ) => {
-            Object::move_by(PLAYER, 0, 1, &game.map, objects);
+            player_move_or_attack(0, 1, game, objects);
             TookTurn
         }
         (
@@ -356,7 +375,7 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAc
             _,
             true,
         ) => {
-            Object::move_by(PLAYER, -1, 0, &game.map, objects);
+            player_move_or_attack(-1, 0, game, objects);
             TookTurn
         }
         (
@@ -367,7 +386,7 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAc
             _,
             true,
         ) => {
-            Object::move_by(PLAYER, 1, 0, &game.map, objects);
+            player_move_or_attack(1, 0, game, objects);
             TookTurn
         }
         _ => DidntTakeTurn,
@@ -417,9 +436,16 @@ fn main() {
         tcod.root.flush();
 
         previous_player_position = objects[PLAYER].position();
-        let action = handle_keys(&mut tcod, &game, &mut objects);
+        let action = handle_keys(&mut tcod, &mut game, &mut objects);
         if action == PlayerAction::Exit {
             break;
+        }
+        if objects[PLAYER].alive && action != PlayerAction::DidntTakeTurn {
+            for object in objects.iter().skip(1) {
+                if object.alive {
+                    println!("The {} growls!", object.name);
+                }
+            }
         }
     }
 }
