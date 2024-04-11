@@ -38,6 +38,7 @@ const COLOR_LIGHT_GROUND: Color = Color {
 const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 30;
+const MAX_ROOM_MONSTERS: i32 = 3;
 
 const FOV_ALGORITHM: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -135,7 +136,27 @@ struct Game {
     map: Map,
 }
 
-fn make_map(player: &mut Object) -> Map {
+fn create_room(room: Rect, map: &mut Map) {
+    for x in (room.x1 + 1)..room.x2 {
+        for y in (room.y1 + 1)..room.y2 {
+            map[x as usize][y as usize] = Tile::empty();
+        }
+    }
+}
+
+fn create_h_tunnel(x1: i32, x2: i32, y: i32, map: &mut Map) {
+    for x in min(x1, x2)..=max(x1, x2) {
+        map[x as usize][y as usize] = Tile::empty();
+    }
+}
+
+fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
+    for y in min(y1, y2)..=max(y1, y2) {
+        map[x as usize][y as usize] = Tile::empty();
+    }
+}
+
+fn make_map(objects: &mut Vec<Object>) -> Map {
     let mut map = vec![vec![Tile::wall(); MAP_HEIGHT as usize]; MAP_WIDTH as usize];
     let mut rooms = vec![];
 
@@ -154,8 +175,10 @@ fn make_map(player: &mut Object) -> Map {
         }
 
         create_room(new_room, &mut map);
+        place_objects(new_room, objects);
         let (new_x, new_y) = new_room.center();
         if rooms.is_empty() {
+            let player = &mut objects[0];
             player.x = new_x;
             player.y = new_y;
         } else {
@@ -175,23 +198,17 @@ fn make_map(player: &mut Object) -> Map {
     map
 }
 
-fn create_room(room: Rect, map: &mut Map) {
-    for x in (room.x1 + 1)..room.x2 {
-        for y in (room.y1 + 1)..room.y2 {
-            map[x as usize][y as usize] = Tile::empty();
-        }
-    }
-}
-
-fn create_h_tunnel(x1: i32, x2: i32, y: i32, map: &mut Map) {
-    for x in min(x1, x2)..=max(x1, x2) {
-        map[x as usize][y as usize] = Tile::empty();
-    }
-}
-
-fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
-    for y in min(y1, y2)..=max(y1, y2) {
-        map[x as usize][y as usize] = Tile::empty();
+fn place_objects(room: Rect, objects: &mut Vec<Object>) {
+    let num_monsters = rand::thread_rng().gen_range(0..=MAX_ROOM_MONSTERS);
+    for _ in 0..num_monsters {
+        let x = rand::thread_rng().gen_range(room.x1 + 1..room.x2);
+        let y = rand::thread_rng().gen_range(room.y1 + 1..room.y2);
+        let monster = if rand::random::<f32>() < 0.8 {
+            Object::new(x, y, 'o', colors::DESATURATED_GREEN)
+        } else {
+            Object::new(x, y, 'T', colors::DARKER_GREEN)
+        };
+        objects.push(monster);
     }
 }
 
@@ -304,11 +321,10 @@ fn main() {
     };
 
     let player = Object::new(25, 23, '@', colors::WHITE);
-    let npc = Object::new(MAP_WIDTH / 2 - 5, MAP_HEIGHT / 2, '@', colors::YELLOW);
-    let mut objects = [player, npc];
+    let mut objects = vec![player];
 
     let mut game = Game {
-        map: make_map(&mut objects[0]),
+        map: make_map(&mut objects),
     };
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
