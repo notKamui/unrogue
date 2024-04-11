@@ -39,7 +39,7 @@ const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 30;
 
-const FOV_ALOGORITHM: FovAlgorithm = FovAlgorithm::Basic;
+const FOV_ALGORITHM: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
 const TORCH_RADIUS: i32 = 10;
 
@@ -80,12 +80,14 @@ impl Object {
 #[derive(Clone, Copy, Debug)]
 struct Tile {
     blocked: bool,
+    explored: bool,
     block_sight: bool,
 }
 impl Tile {
     pub fn empty() -> Self {
         Tile {
             blocked: false,
+            explored: false,
             block_sight: false,
         }
     }
@@ -93,6 +95,7 @@ impl Tile {
     pub fn wall() -> Self {
         Tile {
             blocked: true,
+            explored: false,
             block_sight: true,
         }
     }
@@ -192,7 +195,7 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
     }
 }
 
-fn render_all(tcod: &mut Tcod, objects: &[Object], game: &Game, fov_recompute: bool) {
+fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recompute: bool) {
     if fov_recompute {
         let player = &objects[0];
         tcod.fov.compute_fov(
@@ -200,7 +203,7 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &Game, fov_recompute: b
             player.y,
             TORCH_RADIUS,
             FOV_LIGHT_WALLS,
-            FOV_ALOGORITHM,
+            FOV_ALGORITHM,
         );
     }
 
@@ -213,15 +216,20 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &Game, fov_recompute: b
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
             let visible = tcod.fov.is_in_fov(x, y);
-            let wall = game.map[x as usize][y as usize].block_sight;
-            let color = match (visible, wall) {
+            let tile = &mut game.map[x as usize][y as usize];
+            let color = match (visible, tile.blocked) {
                 (false, true) => COLOR_DARK_WALL,
                 (false, false) => COLOR_DARK_GROUND,
                 (true, true) => COLOR_LIGHT_WALL,
                 (true, false) => COLOR_LIGHT_GROUND,
             };
-            tcod.console
-                .set_char_background(x, y, color, BackgroundFlag::Set);
+            if visible {
+                tile.explored = true;
+            }
+            if tile.explored {
+                tcod.console
+                    .set_char_background(x, y, color, BackgroundFlag::Set);
+            }
         }
     }
 
@@ -299,7 +307,7 @@ fn main() {
     let npc = Object::new(MAP_WIDTH / 2 - 5, MAP_HEIGHT / 2, '@', colors::YELLOW);
     let mut objects = [player, npc];
 
-    let game = Game {
+    let mut game = Game {
         map: make_map(&mut objects[0]),
     };
     for y in 0..MAP_HEIGHT {
@@ -320,7 +328,7 @@ fn main() {
         tcod.console.clear();
 
         let fov_recompute = previous_player_position != (objects[0].x, objects[0].y);
-        render_all(&mut tcod, &objects, &game, fov_recompute);
+        render_all(&mut tcod, &objects, &mut game, fov_recompute);
         tcod.root.flush();
 
         previous_player_position = (objects[0].x, objects[0].y);
