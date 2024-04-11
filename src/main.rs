@@ -5,6 +5,7 @@ use tcod::{
     colors,
     console::{blit, Offscreen, Root},
     input::{Key, KeyCode},
+    map::{FovAlgorithm, Map as FovMap},
     system::set_fps,
     BackgroundFlag, Color, Console, FontLayout, FontType,
 };
@@ -18,19 +19,34 @@ const MAP_HEIGHT: i32 = 45;
 const LIMIT_FPS: i32 = 20;
 
 const COLOR_DARK_WALL: Color = Color { r: 0, g: 0, b: 100 };
+const COLOR_LIGHT_WALL: Color = Color {
+    r: 130,
+    g: 110,
+    b: 50,
+};
 const COLOR_DARK_GROUND: Color = Color {
     r: 50,
     g: 50,
     b: 150,
+};
+const COLOR_LIGHT_GROUND: Color = Color {
+    r: 200,
+    g: 180,
+    b: 50,
 };
 
 const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 30;
 
+const FOV_ALOGORITHM: FovAlgorithm = FovAlgorithm::Basic;
+const FOV_LIGHT_WALLS: bool = true;
+const TORCH_RADIUS: i32 = 10;
+
 struct Tcod {
     root: Root,
     console: Offscreen,
+    fov: FovMap,
 }
 
 #[derive(Debug)]
@@ -176,21 +192,36 @@ fn create_v_tunnel(y1: i32, y2: i32, x: i32, map: &mut Map) {
     }
 }
 
-fn render_all(tcod: &mut Tcod, objects: &[Object], game: &Game) {
+fn render_all(tcod: &mut Tcod, objects: &[Object], game: &Game, fov_recompute: bool) {
+    if fov_recompute {
+        let player = &objects[0];
+        tcod.fov.compute_fov(
+            player.x,
+            player.y,
+            TORCH_RADIUS,
+            FOV_LIGHT_WALLS,
+            FOV_ALOGORITHM,
+        );
+    }
+
     for object in objects {
-        object.draw(&mut tcod.console);
+        if tcod.fov.is_in_fov(object.x, object.y) {
+            object.draw(&mut tcod.console);
+        }
     }
 
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
+            let visible = tcod.fov.is_in_fov(x, y);
             let wall = game.map[x as usize][y as usize].block_sight;
-            if wall {
-                tcod.console
-                    .set_char_background(x, y, COLOR_DARK_WALL, BackgroundFlag::Set);
-            } else {
-                tcod.console
-                    .set_char_background(x, y, COLOR_DARK_GROUND, BackgroundFlag::Set);
-            }
+            let color = match (visible, wall) {
+                (false, true) => COLOR_DARK_WALL,
+                (false, false) => COLOR_DARK_GROUND,
+                (true, true) => COLOR_LIGHT_WALL,
+                (true, false) => COLOR_LIGHT_GROUND,
+            };
+            tcod.console
+                .set_char_background(x, y, color, BackgroundFlag::Set);
         }
     }
 
@@ -253,16 +284,16 @@ fn handle_keys(tcod: &mut Tcod, game: &Game, player: &mut Object) -> bool {
 fn main() {
     set_fps(LIMIT_FPS);
 
-    let root = Root::initializer()
-        .font("arial10x10.png", FontLayout::Tcod)
-        .font_type(FontType::Greyscale)
-        .size(SCREEN_WIDTH, SCREEN_HEIGHT)
-        .title("Unrogue")
-        .init();
-
-    let console = Offscreen::new(MAP_WIDTH, MAP_HEIGHT);
-
-    let mut tcod = Tcod { root, console };
+    let mut tcod = Tcod {
+        root: Root::initializer()
+            .font("arial10x10.png", FontLayout::Tcod)
+            .font_type(FontType::Greyscale)
+            .size(SCREEN_WIDTH, SCREEN_HEIGHT)
+            .title("Unrogue")
+            .init(),
+        console: Offscreen::new(MAP_WIDTH, MAP_HEIGHT),
+        fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
+    };
 
     let player = Object::new(25, 23, '@', colors::WHITE);
     let npc = Object::new(MAP_WIDTH / 2 - 5, MAP_HEIGHT / 2, '@', colors::YELLOW);
@@ -271,14 +302,28 @@ fn main() {
     let game = Game {
         map: make_map(&mut objects[0]),
     };
+    for y in 0..MAP_HEIGHT {
+        for x in 0..MAP_WIDTH {
+            tcod.fov.set(
+                x,
+                y,
+                !game.map[x as usize][y as usize].block_sight,
+                !game.map[x as usize][y as usize].blocked,
+            );
+        }
+    }
+
+    let mut previous_player_position = (-1, -1);
 
     while !tcod.root.window_closed() {
         tcod.console.set_default_foreground(colors::WHITE);
         tcod.console.clear();
 
-        render_all(&mut tcod, &objects, &game);
+        let fov_recompute = previous_player_position != (objects[0].x, objects[0].y);
+        render_all(&mut tcod, &objects, &game, fov_recompute);
         tcod.root.flush();
 
+        previous_player_position = (objects[0].x, objects[0].y);
         if handle_keys(&mut tcod, &game, &mut objects[0]) {
             break;
         }
