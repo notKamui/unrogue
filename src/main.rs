@@ -156,6 +156,13 @@ struct Game {
     map: Map,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PlayerAction {
+    TookTurn,
+    DidntTakeTurn,
+    Exit,
+}
+
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
     if map[x as usize][y as usize].blocked {
         return true;
@@ -292,49 +299,79 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
     );
 }
 
-fn key_to_vector(key: Key) -> (i32, i32) {
-    match key {
-        Key {
-            code: KeyCode::Up, ..
-        } => (0, -1),
-        Key {
-            code: KeyCode::Down,
-            ..
-        } => (0, 1),
-        Key {
-            code: KeyCode::Left,
-            ..
-        } => (-1, 0),
-        Key {
-            code: KeyCode::Right,
-            ..
-        } => (1, 0),
-        _ => (0, 0),
-    }
-}
+fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> PlayerAction {
+    use PlayerAction::*;
 
-fn handle_keys(tcod: &mut Tcod, game: &Game, objects: &mut [Object]) -> bool {
     let key = tcod.root.wait_for_keypress(true);
+    let player_alive = objects[PLAYER].alive;
 
-    match key {
-        Key {
-            code: KeyCode::Enter,
-            alt: true,
-            ..
-        } => {
+    match (key, key.text(), player_alive) {
+        (
+            Key {
+                code: KeyCode::Enter,
+                alt: true,
+                ..
+            },
+            _,
+            _,
+        ) => {
             let fullscreen = tcod.root.is_fullscreen();
             tcod.root.set_fullscreen(!fullscreen);
+            DidntTakeTurn
         }
-        Key {
-            code: KeyCode::Escape,
-            ..
-        } => return true,
-        _ => {}
+        (
+            Key {
+                code: KeyCode::Escape,
+                ..
+            },
+            _,
+            _,
+        ) => Exit,
+        (
+            Key {
+                code: KeyCode::Up, ..
+            },
+            _,
+            true,
+        ) => {
+            Object::move_by(PLAYER, 0, -1, &game.map, objects);
+            TookTurn
+        }
+        (
+            Key {
+                code: KeyCode::Down,
+                ..
+            },
+            _,
+            true,
+        ) => {
+            Object::move_by(PLAYER, 0, 1, &game.map, objects);
+            TookTurn
+        }
+        (
+            Key {
+                code: KeyCode::Left,
+                ..
+            },
+            _,
+            true,
+        ) => {
+            Object::move_by(PLAYER, -1, 0, &game.map, objects);
+            TookTurn
+        }
+        (
+            Key {
+                code: KeyCode::Right,
+                ..
+            },
+            _,
+            true,
+        ) => {
+            Object::move_by(PLAYER, 1, 0, &game.map, objects);
+            TookTurn
+        }
+        _ => DidntTakeTurn,
     }
-
-    let (dx, dy) = key_to_vector(key);
-    Object::move_by(PLAYER, dx, dy, &game.map, objects);
-    false
 }
 
 fn main() {
@@ -351,7 +388,8 @@ fn main() {
         fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
     };
 
-    let player = Object::new(25, 23, '@', "Player", colors::WHITE, true);
+    let mut player = Object::new(25, 23, '@', "Player", colors::WHITE, true);
+    player.alive = true;
     let mut objects = vec![player];
 
     let mut game = Game {
@@ -379,7 +417,8 @@ fn main() {
         tcod.root.flush();
 
         previous_player_position = objects[PLAYER].position();
-        if handle_keys(&mut tcod, &game, &mut objects) {
+        let action = handle_keys(&mut tcod, &game, &mut objects);
+        if action == PlayerAction::Exit {
             break;
         }
     }
