@@ -18,6 +18,8 @@ const MAP_HEIGHT: i32 = 45;
 
 const LIMIT_FPS: i32 = 20;
 
+const PLAYER: usize = 0;
+
 const COLOR_DARK_WALL: Color = Color { r: 0, g: 0, b: 100 };
 const COLOR_LIGHT_WALL: Color = Color {
     r: 130,
@@ -60,6 +62,15 @@ struct Object {
 impl Object {
     pub fn new(x: i32, y: i32, char: char, color: colors::Color) -> Self {
         Object { x, y, char, color }
+    }
+
+    pub fn set_position(&mut self, x: i32, y: i32) {
+        self.x = x;
+        self.y = y;
+    }
+
+    pub fn position(&self) -> (i32, i32) {
+        (self.x, self.y)
     }
 
     pub fn move_by(&mut self, dx: i32, dy: i32, game: &Game) {
@@ -178,9 +189,7 @@ fn make_map(objects: &mut Vec<Object>) -> Map {
         place_objects(new_room, objects);
         let (new_x, new_y) = new_room.center();
         if rooms.is_empty() {
-            let player = &mut objects[0];
-            player.x = new_x;
-            player.y = new_y;
+            objects[PLAYER].set_position(new_x, new_y);
         } else {
             let (prev_x, prev_y) = rooms[rooms.len() - 1].center();
             if rand::random() {
@@ -343,12 +352,12 @@ fn main() {
         tcod.console.set_default_foreground(colors::WHITE);
         tcod.console.clear();
 
-        let fov_recompute = previous_player_position != (objects[0].x, objects[0].y);
+        let fov_recompute = previous_player_position != objects[PLAYER].position();
         render_all(&mut tcod, &objects, &mut game, fov_recompute);
         tcod.root.flush();
 
-        previous_player_position = (objects[0].x, objects[0].y);
-        if handle_keys(&mut tcod, &game, &mut objects[0]) {
+        previous_player_position = objects[PLAYER].position();
+        if handle_keys(&mut tcod, &game, &mut objects[PLAYER]) {
             break;
         }
     }
