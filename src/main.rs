@@ -61,6 +61,8 @@ struct Object {
     name: String,
     blocks: bool,
     alive: bool,
+    fighter: Option<Fighter>,
+    ai: Option<Ai>,
 }
 impl Object {
     pub fn new(x: i32, y: i32, char: char, name: &str, color: colors::Color, blocks: bool) -> Self {
@@ -72,6 +74,8 @@ impl Object {
             name: name.into(),
             blocks,
             alive: false,
+            fighter: None,
+            ai: None,
         }
     }
 
@@ -163,6 +167,19 @@ enum PlayerAction {
     Exit,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Fighter {
+    max_hp: i32,
+    hp: i32,
+    defense: i32,
+    power: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Ai {
+    Basic,
+}
+
 fn is_blocked(x: i32, y: i32, map: &Map, objects: &[Object]) -> bool {
     if map[x as usize][y as usize].blocked {
         return true;
@@ -241,9 +258,25 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
             continue;
         }
         let mut monster = if rand::random::<f32>() < 0.8 {
-            Object::new(x, y, 'o', "Orc", colors::DESATURATED_GREEN, true)
+            let mut orc = Object::new(x, y, 'o', "Orc", colors::DESATURATED_GREEN, true);
+            orc.fighter = Some(Fighter {
+                max_hp: 10,
+                hp: 10,
+                defense: 0,
+                power: 3,
+            });
+            orc.ai = Some(Ai::Basic);
+            orc
         } else {
-            Object::new(x, y, 'T', "Troll", colors::DARKER_GREEN, true)
+            let mut troll = Object::new(x, y, 'T', "Troll", colors::DARKER_GREEN, true);
+            troll.fighter = Some(Fighter {
+                max_hp: 16,
+                hp: 16,
+                defense: 1,
+                power: 4,
+            });
+            troll.ai = Some(Ai::Basic);
+            troll
         };
         monster.alive = true;
         objects.push(monster);
@@ -409,6 +442,12 @@ fn main() {
 
     let mut player = Object::new(25, 23, '@', "Player", colors::WHITE, true);
     player.alive = true;
+    player.fighter = Some(Fighter {
+        max_hp: 30,
+        hp: 30,
+        defense: 2,
+        power: 5,
+    });
     let mut objects = vec![player];
 
     let mut game = Game {
