@@ -88,6 +88,17 @@ impl Object {
         (self.x, self.y)
     }
 
+    pub fn distance_to(&self, other: &Object) -> f32 {
+        let dx = other.x - self.x;
+        let dy = other.y - self.y;
+        ((dx.pow(2) + dy.pow(2)) as f32).sqrt()
+    }
+
+    pub fn draw(&self, con: &mut dyn Console) {
+        con.set_default_foreground(self.color);
+        con.put_char(self.x, self.y, self.char, BackgroundFlag::None);
+    }
+
     pub fn move_by(id: usize, dx: i32, dy: i32, map: &Map, objects: &mut [Object]) {
         let (x, y) = objects[id].position();
         let (new_x, new_y) = (x + dx, y + dy);
@@ -96,9 +107,19 @@ impl Object {
         }
     }
 
-    pub fn draw(&self, con: &mut dyn Console) {
-        con.set_default_foreground(self.color);
-        con.put_char(self.x, self.y, self.char, BackgroundFlag::None);
+    pub fn move_towards(
+        id: usize,
+        target_x: i32,
+        target_y: i32,
+        map: &Map,
+        objects: &mut [Object],
+    ) {
+        let dx = target_x - objects[id].x;
+        let dy = target_y - objects[id].y;
+        let distance = ((dx.pow(2) + dy.pow(2)) as f32).sqrt();
+        let dx = (dx as f32 / distance).round() as i32;
+        let dy = (dy as f32 / distance).round() as i32;
+        Object::move_by(id, dx, dy, map, objects);
     }
 }
 
@@ -302,6 +323,28 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Objec
     }
 }
 
+fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Object]) {
+    let (monster_x, monster_y) = objects[monster_id].position();
+    if tcod.fov.is_in_fov(monster_x, monster_y) {
+        if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
+            Object::move_towards(
+                monster_id,
+                objects[PLAYER].x,
+                objects[PLAYER].y,
+                &game.map,
+                objects,
+            );
+        } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
+            let monster = &objects[monster_id];
+            println!(
+                "The {} attacks you for {} hit points.",
+                monster.name,
+                monster.fighter.unwrap().power
+            );
+        }
+    }
+}
+
 fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recompute: bool) {
     if fov_recompute {
         let player = &objects[PLAYER];
@@ -467,7 +510,6 @@ fn main() {
     let mut previous_player_position = (-1, -1);
 
     while !tcod.root.window_closed() {
-        tcod.console.set_default_foreground(colors::WHITE);
         tcod.console.clear();
 
         let fov_recompute = previous_player_position != objects[PLAYER].position();
@@ -480,9 +522,9 @@ fn main() {
             break;
         }
         if objects[PLAYER].alive && action != PlayerAction::DidntTakeTurn {
-            for object in objects.iter().skip(1) {
-                if object.alive {
-                    println!("The {} growls!", object.name);
+            for id in 0..objects.len() {
+                if objects[id].ai.is_some() {
+                    ai_take_turn(id, &tcod, &game, &mut objects);
                 }
             }
         }
