@@ -4,7 +4,7 @@ use rand::Rng;
 use tcod::{
     colors,
     console::{blit, Offscreen, Root},
-    input::{Key, KeyCode},
+    input::{self, Event, Key, KeyCode, Mouse},
     map::{FovAlgorithm, Map as FovMap},
     system::set_fps,
     BackgroundFlag, Color, Console, FontLayout, FontType, TextAlignment,
@@ -59,6 +59,8 @@ struct Tcod {
     console: Offscreen,
     panel: Offscreen,
     fov: FovMap,
+    key: Key,
+    mouse: Mouse,
 }
 
 struct Messages {
@@ -536,6 +538,15 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
         tcod.panel.print_rect(MSG_X, y, MSG_WIDTH, 0, msg);
     }
 
+    tcod.panel.set_default_foreground(colors::LIGHT_GREY);
+    tcod.panel.print_ex(
+        1,
+        3,
+        BackgroundFlag::None,
+        TextAlignment::Left,
+        get_names_under_mouse(tcod.mouse, objects, &tcod.fov),
+    );
+
     blit(
         &tcod.panel,
         (0, 0),
@@ -578,13 +589,24 @@ fn render_bar(
     );
 }
 
+fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> String {
+    objects
+        .iter()
+        .filter(|object| {
+            object.position() == (mouse.cx as i32, mouse.cy as i32)
+                && fov_map.is_in_fov(object.x, object.y)
+        })
+        .map(|object| object.name.clone())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> PlayerAction {
     use PlayerAction::*;
 
-    let key = tcod.root.wait_for_keypress(true);
     let player_alive = objects[PLAYER].alive;
 
-    match (key, key.text(), player_alive) {
+    match (tcod.key, tcod.key.text(), player_alive) {
         (
             Key {
                 code: KeyCode::Enter,
@@ -666,6 +688,8 @@ fn main() {
         console: Offscreen::new(MAP_WIDTH, MAP_HEIGHT),
         panel: Offscreen::new(SCREEN_WIDTH, PANEL_HEIGHT),
         fov: FovMap::new(MAP_WIDTH, MAP_HEIGHT),
+        key: Default::default(),
+        mouse: Default::default(),
     };
 
     let mut player = Object::new(25, 23, '@', "Player", colors::WHITE, true);
@@ -703,6 +727,12 @@ fn main() {
 
     while !tcod.root.window_closed() {
         tcod.console.clear();
+
+        match input::check_for_event(input::MOUSE | input::KEY_PRESS) {
+            Some((_, Event::Mouse(m))) => tcod.mouse = m,
+            Some((_, Event::Key(k))) => tcod.key = k,
+            _ => tcod.key = Default::default(),
+        }
 
         let fov_recompute = previous_player_position != objects[PLAYER].position();
         render_all(&mut tcod, &objects, &mut game, fov_recompute);
