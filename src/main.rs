@@ -20,6 +20,10 @@ const PANEL_HEIGHT: i32 = 5;
 const PANEL_Y: i32 = SCREEN_HEIGHT - PANEL_HEIGHT;
 const BAR_WIDTH: i32 = 20;
 
+const MSG_X: i32 = BAR_WIDTH + 2;
+const MSG_WIDTH: i32 = SCREEN_WIDTH - BAR_WIDTH - 2;
+const MSG_HEIGHT: i32 = PANEL_HEIGHT - 1;
+
 const LIMIT_FPS: i32 = 20;
 
 const PLAYER: usize = 0;
@@ -55,6 +59,23 @@ struct Tcod {
     console: Offscreen,
     panel: Offscreen,
     fov: FovMap,
+}
+
+struct Messages {
+    messages: Vec<(String, Color)>,
+}
+impl Messages {
+    pub fn new() -> Self {
+        Self { messages: vec![] }
+    }
+
+    pub fn add<T: Into<String>>(&mut self, message: T, color: Color) {
+        self.messages.push((message.into(), color));
+    }
+
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &(String, Color)> {
+        self.messages.iter()
+    }
 }
 
 #[derive(Debug)]
@@ -99,7 +120,7 @@ impl Object {
         ((dx.pow(2) + dy.pow(2)) as f32).sqrt()
     }
 
-    pub fn take_damage(&mut self, damage: i32) {
+    pub fn take_damage(&mut self, damage: i32, game: &mut Game) {
         if let Some(fighter) = self.fighter.as_mut() {
             if damage > 0 {
                 fighter.hp -= damage;
@@ -108,23 +129,29 @@ impl Object {
         if let Some(fighter) = self.fighter {
             if fighter.hp <= 0 {
                 self.alive = false;
-                fighter.on_death.callback(self);
+                fighter.on_death.callback(self, game);
             }
         }
     }
 
-    pub fn attack(&mut self, target: &mut Object) {
+    pub fn attack(&mut self, target: &mut Object, game: &mut Game) {
         let damage = self.fighter.map_or(0, |f| f.power) - target.fighter.map_or(0, |f| f.defense);
         if damage > 0 {
-            println!(
-                "{} attacks {} for {} hit points.",
-                self.name, target.name, damage
+            game.messages.add(
+                format!(
+                    "{} attacks {} for {} hit points.",
+                    self.name, target.name, damage
+                ),
+                colors::WHITE,
             );
-            target.take_damage(damage);
+            target.take_damage(damage, game);
         } else {
-            println!(
-                "{} attacks {} but it has no effect!",
-                self.name, target.name
+            game.messages.add(
+                format!(
+                    "{} attacks {} but it has no effect!",
+                    self.name, target.name
+                ),
+                colors::WHITE,
             );
         }
     }
@@ -214,6 +241,7 @@ impl Rect {
 
 struct Game {
     map: Map,
+    messages: Messages,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -238,23 +266,30 @@ enum DeathCallback {
     Monster,
 }
 impl DeathCallback {
-    pub fn callback(self, object: &mut Object) {
+    pub fn callback(self, object: &mut Object, game: &mut Game) {
         use DeathCallback::*;
-        let callback: fn(&mut Object) = match self {
+        let callback: fn(&mut Object, &mut Game) = match self {
             Player => DeathCallback::player_death,
             Monster => DeathCallback::monster_death,
         };
-        callback(object);
+        callback(object, game);
     }
 
-    fn player_death(player: &mut Object) {
-        println!("You died!");
+    fn player_death(player: &mut Object, game: &mut Game) {
+        game.messages.add("You died!", colors::RED);
         player.char = '%';
         player.color = colors::DARK_RED;
     }
 
-    fn monster_death(monster: &mut Object) {
-        println!("{} is dead!", monster.name);
+    fn monster_death(monster: &mut Object, game: &mut Game) {
+        game.messages.add(
+            format!(
+                "{} is dead! You gain {} experience points.",
+                monster.name,
+                monster.fighter.unwrap().max_hp
+            ),
+            colors::ORANGE,
+        );
         monster.char = '%';
         monster.color = colors::DARK_RED;
         monster.blocks = false;
@@ -394,7 +429,7 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Objec
     match target_id {
         Some(target_id) => {
             let (player, target) = mut_two(PLAYER, target_id, objects);
-            player.attack(target);
+            player.attack(target, game);
         }
         None => {
             Object::move_by(PLAYER, dx, dy, &game.map, objects);
@@ -402,7 +437,7 @@ fn player_move_or_attack(dx: i32, dy: i32, game: &mut Game, objects: &mut [Objec
     }
 }
 
-fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Object]) {
+fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &mut Game, objects: &mut [Object]) {
     let (monster_x, monster_y) = objects[monster_id].position();
     if tcod.fov.is_in_fov(monster_x, monster_y) {
         if objects[monster_id].distance_to(&objects[PLAYER]) >= 2.0 {
@@ -415,7 +450,7 @@ fn ai_take_turn(monster_id: usize, tcod: &Tcod, game: &Game, objects: &mut [Obje
             );
         } else if objects[PLAYER].fighter.map_or(false, |f| f.hp > 0) {
             let (monster, player) = mut_two(monster_id, PLAYER, objects);
-            monster.attack(player);
+            monster.attack(player, game);
         }
     }
 }
@@ -489,6 +524,18 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
         colors::LIGHT_RED,
         colors::DARKER_RED,
     );
+
+    let mut y = MSG_HEIGHT;
+    for &(ref msg, color) in game.messages.iter().rev() {
+        let msg_height = tcod.panel.get_height_rect(MSG_X, y, MSG_WIDTH, 0, msg);
+        y -= msg_height;
+        if y < 0 {
+            break;
+        }
+        tcod.panel.set_default_foreground(color);
+        tcod.panel.print_rect(MSG_X, y, MSG_WIDTH, 0, msg);
+    }
+
     blit(
         &tcod.panel,
         (0, 0),
@@ -497,7 +544,7 @@ fn render_all(tcod: &mut Tcod, objects: &[Object], game: &mut Game, fov_recomput
         (0, PANEL_Y),
         1.0,
         1.0,
-    )
+    );
 }
 
 fn render_bar(
@@ -634,6 +681,7 @@ fn main() {
 
     let mut game = Game {
         map: make_map(&mut objects),
+        messages: Messages::new(),
     };
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
@@ -647,6 +695,11 @@ fn main() {
     }
 
     let mut previous_player_position = (-1, -1);
+
+    game.messages.add(
+        "Welcome stranger! Prepare to perish in the Tombs of the Ancient Kings.",
+        colors::RED,
+    );
 
     while !tcod.root.window_closed() {
         tcod.console.clear();
@@ -663,7 +716,7 @@ fn main() {
         if objects[PLAYER].alive && action != PlayerAction::DidntTakeTurn {
             for id in 0..objects.len() {
                 if objects[id].ai.is_some() {
-                    ai_take_turn(id, &tcod, &game, &mut objects);
+                    ai_take_turn(id, &tcod, &mut game, &mut objects);
                 }
             }
         }
