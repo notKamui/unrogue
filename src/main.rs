@@ -49,6 +49,7 @@ const ROOM_MAX_SIZE: i32 = 10;
 const ROOM_MIN_SIZE: i32 = 6;
 const MAX_ROOMS: i32 = 30;
 const MAX_ROOM_MONSTERS: i32 = 3;
+const MAX_ROOM_ITEMS: i32 = 2;
 
 const FOV_ALGORITHM: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -91,6 +92,7 @@ struct Object {
     alive: bool,
     fighter: Option<Fighter>,
     ai: Option<Ai>,
+    item: Option<Item>,
 }
 impl Object {
     pub fn new(x: i32, y: i32, char: char, name: &str, color: colors::Color, blocks: bool) -> Self {
@@ -104,6 +106,7 @@ impl Object {
             alive: false,
             fighter: None,
             ai: None,
+            item: None,
         }
     }
 
@@ -244,6 +247,12 @@ impl Rect {
 struct Game {
     map: Map,
     messages: Messages,
+    inventory: Vec<Object>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Item {
+    Heal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -419,6 +428,35 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         };
         monster.alive = true;
         objects.push(monster);
+    }
+
+    let num_items = rand::thread_rng().gen_range(0..MAX_ROOM_ITEMS);
+    for _ in 0..num_items {
+        let x = rand::thread_rng().gen_range(room.x1 + 1..room.x2);
+        let y = rand::thread_rng().gen_range(room.y1 + 1..room.y2);
+        if is_blocked(x, y, &map, objects) {
+            continue;
+        }
+        let mut object = Object::new(x, y, '!', "Healing potion", colors::VIOLET, false);
+        object.item = Some(Item::Heal);
+        objects.push(object);
+    }
+}
+
+fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
+    if game.inventory.len() >= 26 {
+        game.messages.add(
+            format!(
+                "Your inventory is full, cannot pick up {}.",
+                objects[object_id].name
+            ),
+            colors::RED,
+        );
+    } else {
+        let item = objects.swap_remove(object_id);
+        game.messages
+            .add(format!("You picked up a {}!", item.name), colors::GREEN);
+        game.inventory.push(item);
     }
 }
 
@@ -601,7 +639,7 @@ fn get_names_under_mouse(mouse: Mouse, objects: &[Object], fov_map: &FovMap) -> 
         .join(", ")
 }
 
-fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> PlayerAction {
+fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> PlayerAction {
     use PlayerAction::*;
 
     let player_alive = objects[PLAYER].alive;
@@ -671,6 +709,22 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut [Object]) -> Play
             player_move_or_attack(1, 0, game, objects);
             TookTurn
         }
+        (
+            Key {
+                code: KeyCode::Text,
+                ..
+            },
+            "g",
+            true,
+        ) => {
+            let item_id = objects.iter().position(|object| {
+                object.item.is_some() && object.position() == objects[PLAYER].position()
+            });
+            if let Some(item_id) = item_id {
+                pick_item_up(item_id, game, objects);
+            }
+            DidntTakeTurn
+        }
         _ => DidntTakeTurn,
     }
 }
@@ -706,6 +760,7 @@ fn main() {
     let mut game = Game {
         map: make_map(&mut objects),
         messages: Messages::new(),
+        inventory: vec![],
     };
     for y in 0..MAP_HEIGHT {
         for x in 0..MAP_WIDTH {
