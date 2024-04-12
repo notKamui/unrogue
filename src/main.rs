@@ -54,6 +54,8 @@ const MAX_ROOM_MONSTERS: i32 = 3;
 const MAX_ROOM_ITEMS: i32 = 2;
 
 const HEAL_AMOUNT: i32 = 4;
+const LIGHTNING_DAMAGE: i32 = 20;
+const LIGHTNING_RANGE: i32 = 5;
 
 const FOV_ALGORITHM: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
@@ -263,6 +265,7 @@ struct Game {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Item {
     Heal,
+    Lightning,
 }
 
 enum UseResult {
@@ -452,9 +455,23 @@ fn place_objects(room: Rect, map: &Map, objects: &mut Vec<Object>) {
         if is_blocked(x, y, &map, objects) {
             continue;
         }
-        let mut object = Object::new(x, y, '!', "Healing potion", colors::VIOLET, false);
-        object.item = Some(Item::Heal);
-        objects.push(object);
+        let item = if rand::random::<f32>() < 0.7 {
+            let mut object = Object::new(x, y, '!', "Healing potion", colors::VIOLET, false);
+            object.item = Some(Item::Heal);
+            object
+        } else {
+            let mut object = Object::new(
+                x,
+                y,
+                '#',
+                "Scroll of Lightning Bolt",
+                colors::LIGHT_YELLOW,
+                false,
+            );
+            object.item = Some(Item::Lightning);
+            object
+        };
+        objects.push(item);
     }
 }
 
@@ -475,7 +492,12 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
     }
 }
 
-fn cast_heal(_inventory_id: usize, objects: &mut [Object], game: &mut Game) -> UseResult {
+fn cast_heal(
+    _inventory_id: usize,
+    _tcod: &mut Tcod,
+    objects: &mut [Object],
+    game: &mut Game,
+) -> UseResult {
     let player = &mut objects[PLAYER];
     if let Some(fighter) = player.fighter {
         if fighter.hp == fighter.max_hp {
@@ -488,6 +510,50 @@ fn cast_heal(_inventory_id: usize, objects: &mut [Object], game: &mut Game) -> U
         player.heal(HEAL_AMOUNT);
         UseResult::UsedUp
     } else {
+        UseResult::Cancelled
+    }
+}
+
+fn closest_monster(tcod: &Tcod, max_range: i32, objects: &[Object]) -> Option<usize> {
+    let mut closest_enemy = None;
+    let mut closest_dist = (max_range + 1) as f32;
+    for (id, object) in objects.iter().enumerate() {
+        if id != PLAYER
+            && object.fighter.is_some()
+            && object.ai.is_some()
+            && tcod.fov.is_in_fov(object.x, object.y)
+        {
+            let dist = objects[PLAYER].distance_to(object);
+            if dist < closest_dist {
+                closest_enemy = Some(id);
+                closest_dist = dist;
+            }
+        }
+    }
+    closest_enemy
+}
+
+fn cast_lightning(
+    _inventory_id: usize,
+    tcod: &mut Tcod,
+    objects: &mut [Object],
+    game: &mut Game,
+) -> UseResult {
+    let monster_id = closest_monster(tcod, LIGHTNING_RANGE, objects);
+    if let Some(monster_id) = monster_id {
+        game.messages.add(
+            format!(
+                "A lightning bolt strikes the {} with a loud thunder! \
+                The damage is {} hit points.",
+                objects[monster_id].name, LIGHTNING_DAMAGE
+            ),
+            colors::LIGHT_BLUE,
+        );
+        objects[monster_id].take_damage(LIGHTNING_DAMAGE, game);
+        UseResult::UsedUp
+    } else {
+        game.messages
+            .add("No enemy is close enough to strike.", colors::RED);
         UseResult::Cancelled
     }
 }
@@ -771,7 +837,7 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
                 &mut tcod.root,
             );
             if let Some(inventory_id) = inventory_id {
-                use_item(inventory_id, objects, game);
+                use_item(inventory_id, tcod, objects, game);
             }
             TookTurn
         }
@@ -839,12 +905,13 @@ fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option
     menu(header, &options, INVENTORY_WIDTH, root)
 }
 
-fn use_item(inventory_id: usize, objects: &mut Vec<Object>, game: &mut Game) {
+fn use_item(inventory_id: usize, tcod: &mut Tcod, objects: &mut Vec<Object>, game: &mut Game) {
     if let Some(item) = game.inventory[inventory_id].item {
         let on_use = match item {
             Item::Heal => cast_heal,
+            Item::Lightning => cast_lightning,
         };
-        match on_use(inventory_id, objects, game) {
+        match on_use(inventory_id, tcod, objects, game) {
             UseResult::UsedUp => {
                 game.inventory.remove(inventory_id);
                 ()
