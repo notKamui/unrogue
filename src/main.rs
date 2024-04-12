@@ -53,6 +53,8 @@ const MAX_ROOMS: i32 = 30;
 const MAX_ROOM_MONSTERS: i32 = 3;
 const MAX_ROOM_ITEMS: i32 = 2;
 
+const HEAL_AMOUNT: i32 = 4;
+
 const FOV_ALGORITHM: FovAlgorithm = FovAlgorithm::Basic;
 const FOV_LIGHT_WALLS: bool = true;
 const TORCH_RADIUS: i32 = 10;
@@ -163,6 +165,12 @@ impl Object {
         }
     }
 
+    pub fn heal(&mut self, amount: i32) {
+        if let Some(ref mut fighter) = self.fighter {
+            fighter.hp = cmp::min(fighter.max_hp, fighter.hp + amount);
+        }
+    }
+
     pub fn draw(&self, con: &mut dyn Console) {
         con.set_default_foreground(self.color);
         con.put_char(self.x, self.y, self.char, BackgroundFlag::None);
@@ -255,6 +263,11 @@ struct Game {
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Item {
     Heal,
+}
+
+enum UseResult {
+    UsedUp,
+    Cancelled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -459,6 +472,23 @@ fn pick_item_up(object_id: usize, game: &mut Game, objects: &mut Vec<Object>) {
         game.messages
             .add(format!("You picked up a {}!", item.name), colors::GREEN);
         game.inventory.push(item);
+    }
+}
+
+fn cast_heal(_inventory_id: usize, objects: &mut [Object], game: &mut Game) -> UseResult {
+    let player = &mut objects[PLAYER];
+    if let Some(fighter) = player.fighter {
+        if fighter.hp == fighter.max_hp {
+            game.messages
+                .add("You are already at full health.", colors::RED);
+            return UseResult::Cancelled;
+        }
+        game.messages
+            .add("Your wounds start to feel better!", colors::LIGHT_VIOLET);
+        player.heal(HEAL_AMOUNT);
+        UseResult::UsedUp
+    } else {
+        UseResult::Cancelled
     }
 }
 
@@ -735,11 +765,14 @@ fn handle_keys(tcod: &mut Tcod, game: &mut Game, objects: &mut Vec<Object>) -> P
             "i",
             true,
         ) => {
-            inventory_menu(
+            let inventory_id = inventory_menu(
                 &game.inventory,
                 "Press the key next to an item to use it, or any other to cancel.\n",
                 &mut tcod.root,
             );
+            if let Some(inventory_id) = inventory_id {
+                use_item(inventory_id, objects, game);
+            }
             TookTurn
         }
         _ => DidntTakeTurn,
@@ -804,6 +837,26 @@ fn inventory_menu(inventory: &[Object], header: &str, root: &mut Root) -> Option
         .map(|item| item.name.clone())
         .collect::<Vec<_>>();
     menu(header, &options, INVENTORY_WIDTH, root)
+}
+
+fn use_item(inventory_id: usize, objects: &mut Vec<Object>, game: &mut Game) {
+    if let Some(item) = game.inventory[inventory_id].item {
+        let on_use = match item {
+            Item::Heal => cast_heal,
+        };
+        match on_use(inventory_id, objects, game) {
+            UseResult::UsedUp => {
+                game.inventory.remove(inventory_id);
+                ()
+            }
+            UseResult::Cancelled => game.messages.add("Cancelled", colors::WHITE),
+        }
+    } else {
+        game.messages.add(
+            format!("The {} cannot be used.", game.inventory[inventory_id].name),
+            colors::WHITE,
+        );
+    }
 }
 
 fn main() {
